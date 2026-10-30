@@ -90,6 +90,7 @@ fun CameraScreen() {
     var selectedFilter by remember { mutableStateOf("vintage-warm") }
     var brightnessLevel by remember { mutableFloatStateOf(0f) }
     var polaroidRotation by remember { mutableFloatStateOf(0f) }
+    var polaroidScale by remember { mutableFloatStateOf(1.0f) }
     var activeTab by remember { mutableStateOf<String?>("frames") }
     var isUIHidden by remember { mutableStateOf(false) }
 
@@ -470,7 +471,9 @@ fun CameraScreen() {
                     offsetX = polaroidOffsetX,
                     offsetY = polaroidOffsetY,
                     rotationDegrees = polaroidRotation,
+                    scale = polaroidScale,
                     frameStyle = selectedFrameStyle,
+                    isUIHidden = isUIHidden,
                     onDrag = { dx, dy ->
                         val newX = polaroidOffsetX + dx
                         val newY = polaroidOffsetY + dy
@@ -482,6 +485,9 @@ fun CameraScreen() {
                     },
                     onNudgeRotate = { step ->
                         polaroidRotation = (polaroidRotation + step) % 360f
+                    },
+                    onScaleChange = { newScale ->
+                        polaroidScale = newScale
                     },
                     onTriggerFocus = { triggerFocus("front") }
                 )
@@ -799,55 +805,56 @@ fun CameraScreen() {
                             )
                         }
                     }
-                } else {
-                    // Buton plutitor când setările sunt ascunse (Mod Ecran Curat)
-                    Button(
-                        onClick = { isUIHidden = false },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xDD000000),
-                            contentColor = Color(0xFFFFB300)
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 36.dp, end = 16.dp)
-                    ) {
-                        Text(text = "👁️ Arată Setări", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
                 }
+            } else {
+                // Buton plutitor când setările sunt ascunse (Mod Ecran Curat)
+                Button(
+                    onClick = { isUIHidden = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xDD000000),
+                        contentColor = Color(0xFFFFB300)
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 36.dp, end = 16.dp)
+                ) {
+                    Text(text = "👁️ Arată Setări", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
 
-                // Stratul 4: Butonul de declanșare foto și comutare
-                ShutterButton(
-                    isEnabled = !isProcessing,
-                    isLoading = isProcessing,
-                    onClick = {
-                        val backCap = backImageCapture
-                        val frontCap = frontImageCapture
-                        if (backCap != null && frontCap != null && !isProcessing) {
-                            isProcessing = true
-                            coroutineScope.launch {
-                                try {
-                                    val primaryDeferred = async(Dispatchers.IO) { takePictureToBitmap(context, backCap, !isBackPrimary) }
-                                    val secondaryDeferred = async(Dispatchers.IO) { takePictureToBitmap(context, frontCap, isBackPrimary) }
+            // Stratul 4: Butonul de declanșare foto și comutare
+            ShutterButton(
+                isEnabled = !isProcessing,
+                isLoading = isProcessing,
+                onClick = {
+                    val backCap = backImageCapture
+                    val frontCap = frontImageCapture
+                    if (backCap != null && frontCap != null && !isProcessing) {
+                        isProcessing = true
+                        coroutineScope.launch {
+                            try {
+                                val primaryDeferred = async(Dispatchers.IO) { takePictureToBitmap(context, backCap, !isBackPrimary) }
+                                val secondaryDeferred = async(Dispatchers.IO) { takePictureToBitmap(context, frontCap, isBackPrimary) }
 
-                                    val primaryBitmap = primaryDeferred.await()
-                                    val secondaryBitmap = secondaryDeferred.await()
+                                val primaryBitmap = primaryDeferred.await()
+                                val secondaryBitmap = secondaryDeferred.await()
 
-                                    val relativeX = polaroidOffsetX / screenWidthPx
-                                    val relativeY = polaroidOffsetY / screenHeightPx
+                                val relativeX = polaroidOffsetX / screenWidthPx
+                                val relativeY = polaroidOffsetY / screenHeightPx
 
-                                    val success = ImageProcessingPipeline.createAndSavePolaroid(
-                                        context = context,
-                                        backBitmap = primaryBitmap,
-                                        frontBitmap = secondaryBitmap,
-                                        relativePolaroidX = relativeX,
-                                        relativePolaroidY = relativeY,
-                                        polaroidWidthRatio = 0.36f,
-                                        frameStyle = selectedFrameStyle,
-                                        rotationDegrees = polaroidRotation,
-                                        filter = selectedFilter,
-                                        brightness = brightnessLevel
-                                    )
+                                val success = ImageProcessingPipeline.createAndSavePolaroid(
+                                    context = context,
+                                    backBitmap = primaryBitmap,
+                                    frontBitmap = secondaryBitmap,
+                                    relativePolaroidX = relativeX,
+                                    relativePolaroidY = relativeY,
+                                    polaroidWidthRatio = 0.36f * polaroidScale,
+                                    frameStyle = selectedFrameStyle,
+                                    rotationDegrees = polaroidRotation,
+                                    filter = selectedFilter,
+                                    brightness = brightnessLevel
+                                )
 
                                     if (success) {
                                         Toast.makeText(context, context.getString(R.string.save_success), Toast.LENGTH_SHORT).show()

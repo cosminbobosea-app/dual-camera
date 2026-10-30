@@ -49,6 +49,7 @@ fun PolaroidFrame(
     rotationDegrees: Float,
     scale: Float = 1.0f,
     frameStyle: String,
+    isUIHidden: Boolean = false,
     onDrag: (Float, Float) -> Unit,
     onRotate: (Float) -> Unit,
     onNudgeRotate: (Float) -> Unit,
@@ -76,87 +77,89 @@ fun PolaroidFrame(
                 }
             }
     ) {
-        // Bară fină deasupra ramei pentru Rotire, Mărime și Mișcare
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = (-28).dp)
-                .background(Color(0xCC000000), RoundedCornerShape(12.dp))
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "↺",
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onNudgeRotate(-12f) }
-            )
-            Text(
-                text = if (rotationDegrees != 0f) "${rotationDegrees.toInt()}°" else "Trage",
-                color = Color(0xFFFFB300),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "↻",
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onNudgeRotate(12f) }
-            )
-            Text(text = "|", color = Color(0x55FFFFFF), fontSize = 10.sp)
-            Text(
-                text = "➖",
-                fontSize = 9.sp,
-                modifier = Modifier.clickable { onScaleChange?.invoke((scale - 0.15f).coerceAtLeast(0.5f)) }
-            )
-            Text(
-                text = "${(scale * 100).toInt()}%",
-                color = Color(0xFFFFB300),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onScaleChange?.invoke(1.0f) }
-            )
-            Text(
-                text = "➕",
-                fontSize = 9.sp,
-                modifier = Modifier.clickable { onScaleChange?.invoke((scale + 0.15f).coerceAtMost(2.2f)) }
-            )
-        }
+        if (!isUIHidden) {
+            // Bară fină deasupra ramei pentru Rotire, Mărime și Mișcare
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-28).dp)
+                    .background(Color(0xCC000000), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "↺",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onNudgeRotate(-12f) }
+                )
+                Text(
+                    text = if (rotationDegrees != 0f) "${rotationDegrees.toInt()}°" else "Trage",
+                    color = Color(0xFFFFB300),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "↻",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onNudgeRotate(12f) }
+                )
+                Text(text = "|", color = Color(0x55FFFFFF), fontSize = 10.sp)
+                Text(
+                    text = "➖",
+                    fontSize = 9.sp,
+                    modifier = Modifier.clickable { onScaleChange?.invoke((scale - 0.15f).coerceAtLeast(0.5f)) }
+                )
+                Text(
+                    text = "${(scale * 100).toInt()}%",
+                    color = Color(0xFFFFB300),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onScaleChange?.invoke(1.0f) }
+                )
+                Text(
+                    text = "➕",
+                    fontSize = 9.sp,
+                    modifier = Modifier.clickable { onScaleChange?.invoke((scale + 0.15f).coerceAtMost(2.2f)) }
+                )
+            }
 
-        // Buton Focus rapid pe colțul stânga-sus
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset(x = (-10).dp, y = (-10).dp)
-                .size(26.dp)
-                .background(Color(0xCC000000), CircleShape)
-                .border(1.dp, Color(0xFF00E676), CircleShape)
-                .clickable { onTriggerFocus?.invoke() },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = "🎯", fontSize = 12.sp)
-        }
+            // Buton Focus rapid pe colțul stânga-sus
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = (-10).dp, y = (-10).dp)
+                    .size(26.dp)
+                    .background(Color(0xCC000000), CircleShape)
+                    .border(1.dp, Color(0xFF00E676), CircleShape)
+                    .clickable { onTriggerFocus?.invoke() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "🎯", fontSize = 12.sp)
+            }
 
-        // Buton rotund de Rotire directă (trage de el pe colțul din dreapta-sus)
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 10.dp, y = (-10).dp)
-                .size(26.dp)
-                .background(Color(0xFFFFB300), CircleShape)
-                .border(1.dp, Color.Black, CircleShape)
-                .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        onRotate(dragAmount.x * 0.4f)
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = "↻", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            // Buton rotund de Rotire directă (trage de el pe colțul din dreapta-sus)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 10.dp, y = (-10).dp)
+                    .size(26.dp)
+                    .background(Color(0xFFFFB300), CircleShape)
+                    .border(1.dp, Color.Black, CircleShape)
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            onRotate(dragAmount.x * 0.4f)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "↻", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
         // Corpul Ramei în funcție de stilul ales
