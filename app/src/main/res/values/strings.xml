@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Dual Polaroid Camera</string>
+    <string name="grant_permission">Acordă permisiunea pentru cameră</string>
+    <string name="hardware_error">Eroare hardware: Acest dispozitiv nu suportă rularea simultană a camerei din față și din spate.</string>
+    <string name="save_success">Fotografia Polaroid a fost salvată cu succes în Galerie!</string>
+    <string name="save_failure">Eroare la procesarea sau salvarea fotografiei.</string>
+</resources>
