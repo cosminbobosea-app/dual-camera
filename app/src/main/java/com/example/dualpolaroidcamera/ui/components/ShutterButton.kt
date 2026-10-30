@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,6 +30,9 @@ import androidx.compose.ui.unit.sp
 fun ShutterButton(
     isEnabled: Boolean,
     isLoading: Boolean,
+    isBackPrimary: Boolean = true,
+    isUIHidden: Boolean = false,
+    onToggleSettings: () -> Unit = {},
     onClick: () -> Unit,
     onFlipCamera: () -> Unit,
     modifier: Modifier = Modifier
@@ -37,19 +41,32 @@ fun ShutterButton(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Buton Comutare Cameră Spate/Față
-        Box(
+        // Buton Setări (Afișează / Ascunde panourile de setări)
+        Column(
             modifier = Modifier
-                .size(48.dp)
-                .background(Color(0xCC000000), CircleShape)
-                .border(BorderStroke(2.dp, Color(0xFFFFB300)), CircleShape)
-                .clickable(enabled = isEnabled, onClick = onFlipCamera),
-            contentAlignment = Alignment.Center
+                .size(52.dp)
+                .background(
+                    if (!isUIHidden) Color(0x33F59E0B) else Color(0xCC18181B),
+                    RoundedCornerShape(16.dp)
+                )
+                .border(
+                    BorderStroke(1.5.dp, if (!isUIHidden) Color(0xFFFFB300) else Color(0x33FFFFFF)),
+                    RoundedCornerShape(16.dp)
+                )
+                .clickable(onClick = onToggleSettings),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(text = "⇄", color = Color(0xFFFFB300), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(text = "⚙️", fontSize = 16.sp)
+            Text(
+                text = "Setări",
+                color = if (!isUIHidden) Color(0xFFFCD34D) else Color.LightGray,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         // Declanșator Foto Polaroid Principal
@@ -82,15 +99,23 @@ fun ShutterButton(
             }
         }
 
-        // Spațiu simetric
-        Box(
+        // Buton Comutare Cameră Spate / Față
+        Column(
             modifier = Modifier
-                .size(48.dp)
-                .background(Color(0xCC000000), CircleShape)
-                .border(BorderStroke(1.dp, Color(0x33FFFFFF)), CircleShape),
-            contentAlignment = Alignment.Center
+                .size(52.dp)
+                .background(Color(0xCC18181B), RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.5.dp, Color(0xFFFFB300)), RoundedCornerShape(16.dp))
+                .clickable(enabled = isEnabled, onClick = onFlipCamera),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(text = "DUAL", color = Color.LightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text(text = "⇄", color = Color(0xFFFFB300), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = if (isBackPrimary) "Spate" else "Față",
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }

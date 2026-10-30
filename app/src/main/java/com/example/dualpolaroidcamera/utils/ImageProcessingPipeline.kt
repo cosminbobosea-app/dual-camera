@@ -55,10 +55,11 @@ object ImageProcessingPipeline {
         relativePolaroidY: Float,
         polaroidWidthRatio: Float = 0.36f,
         frameStyle: String = "stamp-vintage",
-        bigFrameStyle: String = "postcard-full",
+        bigFrameStyle: String = "none",
         rotationDegrees: Float = 0f,
         filter: String = "standard",
-        brightness: Float = 0f
+        brightness: Float = 0f,
+        keepFrontBitmap: Boolean = false
     ): Boolean = withContext(Dispatchers.Default) {
         val finalWidth = backBitmap.width
         val finalHeight = backBitmap.height
@@ -327,7 +328,9 @@ object ImageProcessingPipeline {
 
         // Eliberare resurse memorie
         backBitmap.recycle()
-        frontBitmap.recycle()
+        if (!keepFrontBitmap) {
+            frontBitmap.recycle()
+        }
 
         // Salvare în Galerie prin MediaStore
         return@withContext saveToMediaStore(context, finalBitmap)

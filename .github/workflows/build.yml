@@ -25,11 +25,27 @@ jobs:
       - name: Generare Gradle Wrapper stabil
         run: gradle wrapper --gradle-version 8.10.2 --distribution-type bin || true
 
-      - name: Compilare APK Release/Debug
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Generare Keystore Release Semnat (previne blocarea de securitate Play Protect)
+        run: |
+          keytool -genkeypair -v -keystore release.jks \
+            -alias dualpolaroid -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass dualpolaroid123 -keypass dualpolaroid123 \
+            -dname "CN=Dual Polaroid Camera, OU=Mobile, O=CosminBobosea, L=Bucharest, C=RO"
 
-      - name: Salvare APK ca artefact
+      - name: Compilare APK Release Semnat (Recomandat pentru instalare)
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Compilare APK Debug (Alternativ)
+        run: ./gradlew assembleDebug --no-daemon || true
+
+      - name: Salvare APK Release Semnat ca artefact
         uses: actions/upload-artifact@v4
         with:
-          name: DualPolaroidCamera-APK
+          name: DualPolaroidCamera-Release-APK
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Salvare APK Debug ca artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DualPolaroidCamera-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk

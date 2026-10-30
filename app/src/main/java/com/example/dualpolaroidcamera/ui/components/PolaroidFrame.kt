@@ -1,10 +1,13 @@
 package com.example.dualpolaroidcamera.ui.components
 
+import android.graphics.Bitmap
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,8 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +49,9 @@ import kotlin.math.roundToInt
 @Composable
 fun PolaroidFrame(
     frontPreviewView: PreviewView,
+    frozenSelfieBitmap: Bitmap? = null,
+    selfieCountdown: Int? = null,
+    selfieTimerSeconds: Int = 3,
     offsetX: Float,
     offsetY: Float,
     rotationDegrees: Float,
@@ -55,11 +63,59 @@ fun PolaroidFrame(
     onNudgeRotate: (Float) -> Unit,
     onScaleChange: ((Float) -> Unit)? = null,
     onTriggerFocus: (() -> Unit)? = null,
+    onTakeSelfie: (() -> Unit)? = null,
+    onCycleTimer: (() -> Unit)? = null,
+    onFlipCamera: (() -> Unit)? = null,
+    onCycleSmallFrame: (() -> Unit)? = null,
+    onClearFrozenSelfie: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val currentDate = remember {
         val formatter = SimpleDateFormat("MMM. dd, yyyy", Locale.US)
         formatter.format(Date()).uppercase(Locale.US)
+    }
+
+    @Composable
+    fun RenderInnerFeed() {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (frozenSelfieBitmap != null) {
+                Image(
+                    bitmap = frozenSelfieBitmap.asImageBitmap(),
+                    contentDescription = "Selfie",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AndroidView(
+                    factory = { frontPreviewView },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            if (selfieCountdown != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xCC000000)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = selfieCountdown.toString(),
+                            color = Color(0xFFFFB300),
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "ZÂMBEȘTE!",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
     }
 
     Box(
@@ -71,19 +127,25 @@ fun PolaroidFrame(
                 this.scaleY = scale
             }
             .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    onDrag(dragAmount.x, dragAmount.y)
+                detectTransformGestures { _, pan, zoom, rotationChange ->
+                    onDrag(pan.x, pan.y)
+                    if (zoom != 1f) {
+                        onScaleChange?.invoke(scale * zoom)
+                    }
+                    if (rotationChange != 0f) {
+                        onRotate(rotationChange)
+                    }
                 }
             }
     ) {
         if (!isUIHidden) {
-            // Bară fină deasupra ramei pentru Rotire, Mărime și Mișcare
+            // Bară deasupra ramei pentru Rotire, Mărime și Mișcare
             Row(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .offset(y = (-28).dp)
-                    .background(Color(0xCC000000), RoundedCornerShape(12.dp))
+                    .background(Color(0xDD000000), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp))
                     .padding(horizontal = 8.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -96,7 +158,7 @@ fun PolaroidFrame(
                     modifier = Modifier.clickable { onNudgeRotate(-12f) }
                 )
                 Text(
-                    text = if (rotationDegrees != 0f) "${rotationDegrees.toInt()}°" else "Trage",
+                    text = if (rotationDegrees != 0f) "${rotationDegrees.toInt()}°" else "✥ Trage",
                     color = Color(0xFFFFB300),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
@@ -112,7 +174,7 @@ fun PolaroidFrame(
                 Text(
                     text = "➖",
                     fontSize = 9.sp,
-                    modifier = Modifier.clickable { onScaleChange?.invoke((scale - 0.15f).coerceAtLeast(0.5f)) }
+                    modifier = Modifier.clickable { onScaleChange?.invoke((scale - 0.15f).coerceAtLeast(0.45f)) }
                 )
                 Text(
                     text = "${(scale * 100).toInt()}%",
@@ -124,7 +186,7 @@ fun PolaroidFrame(
                 Text(
                     text = "➕",
                     fontSize = 9.sp,
-                    modifier = Modifier.clickable { onScaleChange?.invoke((scale + 0.15f).coerceAtMost(2.2f)) }
+                    modifier = Modifier.clickable { onScaleChange?.invoke((scale + 0.15f).coerceAtMost(2.3f)) }
                 )
             }
 
@@ -133,21 +195,21 @@ fun PolaroidFrame(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .offset(x = (-10).dp, y = (-10).dp)
-                    .size(26.dp)
-                    .background(Color(0xCC000000), CircleShape)
-                    .border(1.dp, Color(0xFF00E676), CircleShape)
+                    .size(28.dp)
+                    .background(Color(0xEE000000), CircleShape)
+                    .border(1.dp, Color(0xFFFFB300), CircleShape)
                     .clickable { onTriggerFocus?.invoke() },
                 contentAlignment = Alignment.Center
             ) {
                 Text(text = "🎯", fontSize = 12.sp)
             }
 
-            // Buton rotund de Rotire directă (trage de el pe colțul din dreapta-sus)
+            // Buton rotund de Rotire directă pe colțul din dreapta-sus
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset(x = 10.dp, y = (-10).dp)
-                    .size(26.dp)
+                    .size(28.dp)
                     .background(Color(0xFFFFB300), CircleShape)
                     .border(1.dp, Color.Black, CircleShape)
                     .pointerInput(Unit) {
@@ -160,12 +222,112 @@ fun PolaroidFrame(
             ) {
                 Text(text = "↻", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
+
+            // Buton rotund de Redimensionare (Mărire / Micșorare prin tragere) pe colțul din dreapta-jos
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 10.dp, y = 10.dp)
+                    .size(28.dp)
+                    .background(Color(0xFFFB923C), CircleShape)
+                    .border(1.dp, Color.Black, CircleShape)
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val delta = (dragAmount.x + dragAmount.y) / 180f
+                            onScaleChange?.invoke(scale + delta)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "⤡", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // Bara de Setări și Controale Atașată Jos la Cadrul Mic (Selfie, Timer, Comutare, Stil Ramă)
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = 44.dp)
+                    .background(Color(0xF2000000), RoundedCornerShape(16.dp))
+                    .border(1.5.dp, Color(0x99FFB300), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Buton Selfie cu numărătoare inversă
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFFFFB300), RoundedCornerShape(10.dp))
+                        .clickable { onTakeSelfie?.invoke() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (selfieTimerSeconds > 0) "📷 Selfie (${selfieTimerSeconds}s)" else "📷 Selfie",
+                        color = Color.Black,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                // Selector Timer (Off / 3s / 10s)
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (selfieTimerSeconds > 0) Color(0x4DFB923C) else Color(0xFF27272A),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .border(1.dp, Color(0x66FB923C), RoundedCornerShape(10.dp))
+                        .clickable { onCycleTimer?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (selfieTimerSeconds > 0) "⏱ ${selfieTimerSeconds}s" else "⏱ Off",
+                        color = Color(0xFFFDBA74),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                // Schimbă camera
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .clickable { onFlipCamera?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "🔄", fontSize = 10.sp)
+                }
+
+                // Schimbă rama mică
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .clickable { onCycleSmallFrame?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "✨", fontSize = 10.sp)
+                }
+
+                if (frozenSelfieBitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF991B1B), RoundedCornerShape(10.dp))
+                            .clickable { onClearFrozenSelfie?.invoke() }
+                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                    ) {
+                        Text(text = "✕", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
         // Corpul Ramei în funcție de stilul ales
         when (frameStyle) {
             "stamp-vintage", "stamp" -> {
-                // Timbru Poștal Vintage Gravat (Model 1: Benjamin Franklin 1¢)
                 Card(
                     modifier = Modifier
                         .width(148.dp)
@@ -196,10 +358,7 @@ fun PolaroidFrame(
                                 .border(2.dp, Color(0xFFBEE3F8), RoundedCornerShape(80.dp))
                                 .background(Color.Black)
                         ) {
-                            AndroidView(
-                                factory = { frontPreviewView },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            RenderInnerFeed()
                         }
                         Row(
                             modifier = Modifier
@@ -217,7 +376,6 @@ fun PolaroidFrame(
             }
 
             "stamp-modern" -> {
-                // Timbru Poștal Modern (Model 2: Travel Stamp)
                 Card(
                     modifier = Modifier
                         .width(145.dp)
@@ -247,10 +405,7 @@ fun PolaroidFrame(
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(Color.Black)
                         ) {
-                            AndroidView(
-                                factory = { frontPreviewView },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            RenderInnerFeed()
                         }
                         Text(
                             text = "TRAVEL STAMP • $currentDate",
@@ -264,7 +419,6 @@ fun PolaroidFrame(
             }
 
             "film35" -> {
-                // Film 35mm Negativ cu perforații
                 Card(
                     modifier = Modifier
                         .width(142.dp)
@@ -293,10 +447,7 @@ fun PolaroidFrame(
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(Color.Black)
                         ) {
-                            AndroidView(
-                                factory = { frontPreviewView },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            RenderInnerFeed()
                         }
                         Text(
                             text = "ISO 400 • $currentDate",
@@ -310,7 +461,6 @@ fun PolaroidFrame(
             }
 
             "circle" -> {
-                // Medalion Rotund cu Ramă Aurie
                 Box(
                     modifier = Modifier
                         .size(150.dp)
@@ -325,16 +475,12 @@ fun PolaroidFrame(
                             .clip(CircleShape)
                             .background(Color.Black)
                     ) {
-                        AndroidView(
-                            factory = { frontPreviewView },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        RenderInnerFeed()
                     }
                 }
             }
 
             "postcard" -> {
-                // Vedere Retro Vintage
                 Card(
                     modifier = Modifier
                         .width(145.dp)
@@ -357,10 +503,7 @@ fun PolaroidFrame(
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(Color.Black)
                         ) {
-                            AndroidView(
-                                factory = { frontPreviewView },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            RenderInnerFeed()
                         }
                         Text(
                             text = "AIR MAIL • $currentDate",
@@ -390,7 +533,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "🎃 HALLOWEEN", color = Color(0xFFFB923C), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "🕷️ SPOOKY NIGHT • $currentDate", color = Color(0xFFFDBA74), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -413,7 +556,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "🎄 MERRY CHRISTMAS ❄️", color = Color(0xFFFEF08A), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "🔔 $currentDate", color = Color(0xFFFED7AA), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -436,7 +579,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "💖 LOVE FOREVER 🌹", color = Color(0xFFFFE4E6), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "With Love • $currentDate", color = Color(0xFFFECDD3), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -459,7 +602,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "🌺 ALOHA HAWAII 🌴", color = Color(0xFFFEF08A), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "☀️ $currentDate", color = Color(0xFFA7F3D0), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -482,7 +625,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "★ OMERTÀ // DOSAR #1931 ★", color = Color(0xFFEF4444), fontSize = 8.sp, fontWeight = FontWeight.Black)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "CONFIDENTIAL • $currentDate", color = Color(0xFFD4D4D8), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -505,7 +648,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "⚡ WITNESS ME! 💀", color = Color(0xFFFACC15), fontSize = 9.sp, fontWeight = FontWeight.Black)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "FURY ROAD • $currentDate", color = Color(0xFFEAB308), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -528,7 +671,7 @@ fun PolaroidFrame(
                     ) {
                         Text(text = "MAX PAIN 🎯", color = Color(0xFFFACC15), fontSize = 9.sp, fontWeight = FontWeight.Black)
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(0.dp)).background(Color.Black)) {
-                            AndroidView(factory = { frontPreviewView }, modifier = Modifier.fillMaxSize())
+                            RenderInnerFeed()
                         }
                         Text(text = "„Cold day in hell...” • $currentDate", color = Color(0xFFFEF08A), fontSize = 7.5.sp, modifier = Modifier.padding(top = 4.dp))
                     }
@@ -536,7 +679,6 @@ fun PolaroidFrame(
             }
 
             else -> {
-                // Polaroid Clasic - Marginea de sus este garantat curată și vizibilă!
                 Card(
                     modifier = Modifier
                         .width(142.dp)
@@ -558,10 +700,7 @@ fun PolaroidFrame(
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(Color.Black)
                         ) {
-                            AndroidView(
-                                factory = { frontPreviewView },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            RenderInnerFeed()
                         }
 
                         Box(
