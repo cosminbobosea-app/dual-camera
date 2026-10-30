@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -57,6 +58,12 @@ fun PolaroidFrame(
     rotationDegrees: Float,
     scale: Float = 1.0f,
     frameStyle: String,
+    captionText: String = "",
+    captionFont: String = "handwriting",
+    cityName: String = "BUCUREȘTI",
+    gyroPitch: Float = 0f,
+    gyroRoll: Float = 0f,
+    gyroEnabled: Boolean = true,
     isUIHidden: Boolean = false,
     onDrag: (Float, Float) -> Unit,
     onRotate: (Float) -> Unit,
@@ -67,12 +74,21 @@ fun PolaroidFrame(
     onCycleTimer: (() -> Unit)? = null,
     onFlipCamera: (() -> Unit)? = null,
     onCycleSmallFrame: (() -> Unit)? = null,
+    onEditCaption: (() -> Unit)? = null,
     onClearFrozenSelfie: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val currentDate = remember {
         val formatter = SimpleDateFormat("MMM. dd, yyyy", Locale.US)
         formatter.format(Date()).uppercase(Locale.US)
+    }
+
+    val fullStampLabel = if (cityName.isNotBlank()) "${cityName.uppercase()} • $currentDate" else currentDate
+    val chosenFont = when (captionFont) {
+        "handwriting" -> FontFamily.Cursive
+        "retro" -> FontFamily.Serif
+        "typewriter" -> FontFamily.Monospace
+        else -> FontFamily.SansSerif
     }
 
     @Composable
@@ -123,6 +139,9 @@ fun PolaroidFrame(
             .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
             .graphicsLayer {
                 this.rotationZ = rotationDegrees
+                this.rotationX = if (gyroEnabled) (gyroPitch * 0.42f).coerceIn(-16f, 16f) else 0f
+                this.rotationY = if (gyroEnabled) (gyroRoll * 0.42f).coerceIn(-16f, 16f) else 0f
+                this.cameraDistance = 12f * density
                 this.scaleX = scale
                 this.scaleY = scale
             }
@@ -243,7 +262,7 @@ fun PolaroidFrame(
                 Text(text = "⤡", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
 
-            // Bara de Setări și Controale Atașată Jos la Cadrul Mic (Selfie, Timer, Comutare, Stil Ramă)
+            // Bara de Setări și Controale Atașată Jos la Cadrul Mic (Selfie, Timer, Comutare, Stil Ramă, Text)
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -309,7 +328,17 @@ fun PolaroidFrame(
                         .clickable { onCycleSmallFrame?.invoke() }
                         .padding(horizontal = 7.dp, vertical = 4.dp)
                 ) {
-                    Text(text = "✨", fontSize = 10.sp)
+                    Text(text = "▣", color = Color(0xFFFFB300), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Editează Text / Ștampilă
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .clickable { onEditCaption?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "✍️", fontSize = 10.sp)
                 }
 
                 if (frozenSelfieBitmap != null) {
@@ -344,10 +373,11 @@ fun PolaroidFrame(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "★ UNITED STATES POSTAGE ★",
+                            text = "★ ${cityName.ifBlank { "UNITED STATES" }} POSTAGE ★",
                             color = Color.White,
                             fontSize = 7.sp,
                             fontWeight = FontWeight.Black,
+                            maxLines = 1,
                             modifier = Modifier.padding(bottom = 4.dp)
                         )
                         Box(
@@ -363,12 +393,19 @@ fun PolaroidFrame(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 4.dp),
+                                .padding(top = 4.dp)
+                                .clickable { onEditCaption?.invoke() },
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(text = "1¢", color = Color(0xFFBEE3F8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "ONE CENT", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = captionText.ifBlank { "ONE CENT" }.uppercase().take(14),
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
                             Text(text = "1¢", color = Color(0xFFBEE3F8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -395,7 +432,7 @@ fun PolaroidFrame(
                             modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = "ROMÂNIA", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(text = cityName.ifBlank { "ROMÂNIA" }.take(12), color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             Text(text = "$4.90", color = Color(0xFF2E7D32), fontSize = 10.sp, fontWeight = FontWeight.Black)
                         }
                         Box(
@@ -408,11 +445,12 @@ fun PolaroidFrame(
                             RenderInnerFeed()
                         }
                         Text(
-                            text = "TRAVEL STAMP • $currentDate",
+                            text = "${captionText.ifBlank { "TRAVEL" }} • $currentDate",
                             color = Color.DarkGray,
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(top = 4.dp)
+                            maxLines = 1,
+                            modifier = Modifier.padding(top = 4.dp).clickable { onEditCaption?.invoke() }
                         )
                     }
                 }
@@ -434,10 +472,11 @@ fun PolaroidFrame(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "▸ KODAK 400 • 24A",
+                            text = "▸ KODAK 400 • $cityName",
                             color = Color(0xFFFFB300),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
                             modifier = Modifier.align(Alignment.Start).padding(bottom = 4.dp)
                         )
                         Box(
@@ -450,10 +489,11 @@ fun PolaroidFrame(
                             RenderInnerFeed()
                         }
                         Text(
-                            text = "ISO 400 • $currentDate",
+                            text = "${captionText.ifBlank { "ISO 400" }} • $currentDate",
                             color = Color.LightGray,
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -506,12 +546,13 @@ fun PolaroidFrame(
                             RenderInnerFeed()
                         }
                         Text(
-                            text = "AIR MAIL • $currentDate",
+                            text = "${captionText.ifBlank { "AIR MAIL" }} • $currentDate",
                             color = Color(0xFFC2185B),
-                            fontSize = 9.sp,
+                            fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(top = 6.dp)
+                            fontFamily = chosenFont,
+                            maxLines = 1,
+                            modifier = Modifier.padding(top = 6.dp).clickable { onEditCaption?.invoke() }
                         )
                     }
                 }
@@ -535,7 +576,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "🕷️ SPOOKY NIGHT • $currentDate", color = Color(0xFFFDBA74), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "🕷️ $fullStampLabel", color = Color(0xFFFDBA74), fontSize = 8.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -558,7 +599,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "🔔 $currentDate", color = Color(0xFFFED7AA), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "🔔 $fullStampLabel", color = Color(0xFFFED7AA), fontSize = 8.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -581,7 +622,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "With Love • $currentDate", color = Color(0xFFFECDD3), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "${captionText.ifBlank { "With Love" }} • $currentDate", color = Color(0xFFFECDD3), fontSize = 8.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -604,7 +645,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "☀️ $currentDate", color = Color(0xFFA7F3D0), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "☀️ $fullStampLabel", color = Color(0xFFA7F3D0), fontSize = 8.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -627,7 +668,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "CONFIDENTIAL • $currentDate", color = Color(0xFFD4D4D8), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "CONFIDENTIAL • $fullStampLabel", color = Color(0xFFD4D4D8), fontSize = 8.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -650,7 +691,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "FURY ROAD • $currentDate", color = Color(0xFFEAB308), fontSize = 8.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "FURY ROAD • $fullStampLabel", color = Color(0xFFEAB308), fontSize = 8.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -673,7 +714,7 @@ fun PolaroidFrame(
                         Box(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(0.dp)).background(Color.Black)) {
                             RenderInnerFeed()
                         }
-                        Text(text = "„Cold day in hell...” • $currentDate", color = Color(0xFFFEF08A), fontSize = 7.5.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(text = "„${captionText.ifBlank { "Cold day in hell..." }}” • $currentDate", color = Color(0xFFFEF08A), fontSize = 7.5.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -682,7 +723,7 @@ fun PolaroidFrame(
                 Card(
                     modifier = Modifier
                         .width(142.dp)
-                        .height(184.dp),
+                        .height(188.dp),
                     shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
@@ -690,7 +731,7 @@ fun PolaroidFrame(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(start = 9.dp, end = 9.dp, top = 12.dp, bottom = 8.dp),
+                            .padding(start = 9.dp, end = 9.dp, top = 12.dp, bottom = 6.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
@@ -703,18 +744,39 @@ fun PolaroidFrame(
                             RenderInnerFeed()
                         }
 
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(26.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(top = 4.dp)
+                                .clickable { onEditCaption?.invoke() },
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            if (captionText.isNotBlank()) {
+                                Text(
+                                    text = captionText,
+                                    color = Color.Black,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = chosenFont,
+                                    fontStyle = FontStyle.Italic,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.Center
+                                )
+                            } else {
+                                Text(
+                                    text = "✍️ + scrie mesaj",
+                                    color = Color.Gray,
+                                    fontSize = 8.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             Text(
-                                text = currentDate,
-                                color = Color.Black,
-                                fontSize = 10.sp,
+                                text = fullStampLabel,
+                                color = Color.DarkGray,
+                                fontSize = 8.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
                                 textAlign = TextAlign.Center
                             )
                         }
