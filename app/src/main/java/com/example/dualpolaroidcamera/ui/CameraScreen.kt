@@ -939,13 +939,13 @@ fun CameraScreen() {
                                 verticalArrangement = Arrangement.SpaceEvenly
                             ) {
                                 listOf(
-                                    "6'6" / 198cm",
-                                    "6'3" / 190cm",
-                                    "6'0" / 183cm",
-                                    "5'9" / 175cm",
-                                    "5'6" / 168cm",
-                                    "5'3" / 160cm",
-                                    "5'0" / 152cm"
+                                    "6'6″ / 198cm",
+                                    "6'3″ / 190cm",
+                                    "6'0″ / 183cm",
+                                    "5'9″ / 175cm",
+                                    "5'6″ / 168cm",
+                                    "5'3″ / 160cm",
+                                    "5'0″ / 152cm"
                                 ).forEach { mark ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),

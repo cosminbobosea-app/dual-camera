@@ -336,7 +336,7 @@ object ImageProcessingPipeline {
                     typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                     setShadowLayer(4f, 0f, 2f, Color.BLACK)
                 }
-                val heights = listOf("6'6" / 198cm", "6'0" / 183cm", "5'6" / 168cm", "5'0" / 152cm", "4'6" / 137cm")
+                val heights = listOf("6'6″ / 198cm", "6'0″ / 183cm", "5'6″ / 168cm", "5'0″ / 152cm", "4'6″ / 137cm")
                 heights.forEachIndexed { idx, label ->
                     val yPos = finalHeight * (0.14f + idx * 0.13f)
                     canvas.drawLine(0f, yPos, finalWidth.toFloat(), yPos, rulerPaint)
@@ -511,7 +511,7 @@ object ImageProcessingPipeline {
                         textAlign = Paint.Align.RIGHT
                         setShadowLayer(3f, 0f, 1f, Color.BLACK)
                     }
-                    listOf("6'6"", "6'0"", "5'6"", "5'0"").forEachIndexed { idx, h ->
+                    listOf("6'6″", "6'0″", "5'6″", "5'0″").forEachIndexed { idx, h ->
                         val ty = photoTop + (photoBottom - photoTop) * (0.2f + idx * 0.2f)
                         canvas.drawText("$h —", photoRight - 6f, ty, tickPaint)
                     }

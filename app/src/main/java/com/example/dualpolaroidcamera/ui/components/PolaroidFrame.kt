@@ -571,7 +571,7 @@ fun PolaroidFrame(
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                                 horizontalAlignment = Alignment.End
                             ) {
-                                listOf("6'6"", "6'0"", "5'6"", "5'0"").forEach { h ->
+                                listOf("6'6″", "6'0″", "5'6″", "5'0″").forEach { h ->
                                     Text(
                                         text = "$h —",
                                         color = Color.White,
