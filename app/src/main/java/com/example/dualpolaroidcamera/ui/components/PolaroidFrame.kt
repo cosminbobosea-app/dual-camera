@@ -25,7 +25,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -78,6 +81,12 @@ fun PolaroidFrame(
     onClearFrozenSelfie: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    // Păstrăm referințele actualizate ca pointerInput(Unit) să aibă mereu valoarea curentă a scale-ului
+    val currentScale by rememberUpdatedState(scale)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnRotate by rememberUpdatedState(onRotate)
+    val currentOnScaleChange by rememberUpdatedState(onScaleChange)
+
     val currentDate = remember {
         val formatter = SimpleDateFormat("MMM. dd, yyyy", Locale.US)
         formatter.format(Date()).uppercase(Locale.US)
@@ -147,214 +156,17 @@ fun PolaroidFrame(
             }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, rotationChange ->
-                    onDrag(pan.x, pan.y)
+                    currentOnDrag(pan.x, pan.y)
                     if (zoom != 1f) {
-                        onScaleChange?.invoke(scale * zoom)
+                        currentOnScaleChange?.invoke((currentScale * zoom).coerceIn(0.45f, 2.3f))
                     }
                     if (rotationChange != 0f) {
-                        onRotate(rotationChange)
+                        currentOnRotate(rotationChange)
                     }
                 }
             }
     ) {
-        if (!isUIHidden) {
-            // Bară deasupra ramei pentru Rotire, Mărime și Mișcare
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = (-28).dp)
-                    .background(Color(0xDD000000), RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "↺",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { onNudgeRotate(-12f) }
-                )
-                Text(
-                    text = if (rotationDegrees != 0f) "${rotationDegrees.toInt()}°" else "✥ Trage",
-                    color = Color(0xFFFFB300),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "↻",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { onNudgeRotate(12f) }
-                )
-                Text(text = "|", color = Color(0x55FFFFFF), fontSize = 10.sp)
-                Text(
-                    text = "➖",
-                    fontSize = 9.sp,
-                    modifier = Modifier.clickable { onScaleChange?.invoke((scale - 0.15f).coerceAtLeast(0.45f)) }
-                )
-                Text(
-                    text = "${(scale * 100).toInt()}%",
-                    color = Color(0xFFFFB300),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { onScaleChange?.invoke(1.0f) }
-                )
-                Text(
-                    text = "➕",
-                    fontSize = 9.sp,
-                    modifier = Modifier.clickable { onScaleChange?.invoke((scale + 0.15f).coerceAtMost(2.3f)) }
-                )
-            }
-
-            // Buton Focus rapid pe colțul stânga-sus
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset(x = (-10).dp, y = (-10).dp)
-                    .size(28.dp)
-                    .background(Color(0xEE000000), CircleShape)
-                    .border(1.dp, Color(0xFFFFB300), CircleShape)
-                    .clickable { onTriggerFocus?.invoke() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "🎯", fontSize = 12.sp)
-            }
-
-            // Buton rotund de Rotire directă pe colțul din dreapta-sus
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 10.dp, y = (-10).dp)
-                    .size(28.dp)
-                    .background(Color(0xFFFFB300), CircleShape)
-                    .border(1.dp, Color.Black, CircleShape)
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            onRotate(dragAmount.x * 0.4f)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "↻", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
-
-            // Buton rotund de Redimensionare (Mărire / Micșorare prin tragere) pe colțul din dreapta-jos
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 10.dp, y = 10.dp)
-                    .size(28.dp)
-                    .background(Color(0xFFFB923C), CircleShape)
-                    .border(1.dp, Color.Black, CircleShape)
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            val delta = (dragAmount.x + dragAmount.y) / 180f
-                            onScaleChange?.invoke(scale + delta)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "⤡", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-
-            // Bara de Setări și Controale Atașată Jos la Cadrul Mic (Selfie, Timer, Comutare, Stil Ramă, Text)
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = 44.dp)
-                    .background(Color(0xF2000000), RoundedCornerShape(16.dp))
-                    .border(1.5.dp, Color(0x99FFB300), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Buton Selfie cu numărătoare inversă
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFFFFB300), RoundedCornerShape(10.dp))
-                        .clickable { onTakeSelfie?.invoke() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (selfieTimerSeconds > 0) "📷 Selfie (${selfieTimerSeconds}s)" else "📷 Selfie",
-                        color = Color.Black,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-
-                // Selector Timer (Off / 3s / 10s)
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (selfieTimerSeconds > 0) Color(0x4DFB923C) else Color(0xFF27272A),
-                            RoundedCornerShape(10.dp)
-                        )
-                        .border(1.dp, Color(0x66FB923C), RoundedCornerShape(10.dp))
-                        .clickable { onCycleTimer?.invoke() }
-                        .padding(horizontal = 7.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (selfieTimerSeconds > 0) "⏱ ${selfieTimerSeconds}s" else "⏱ Off",
-                        color = Color(0xFFFDBA74),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-
-                // Schimbă camera
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
-                        .clickable { onFlipCamera?.invoke() }
-                        .padding(horizontal = 7.dp, vertical = 4.dp)
-                ) {
-                    Text(text = "🔄", fontSize = 10.sp)
-                }
-
-                // Schimbă rama mică
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
-                        .clickable { onCycleSmallFrame?.invoke() }
-                        .padding(horizontal = 7.dp, vertical = 4.dp)
-                ) {
-                    Text(text = "▣", color = Color(0xFFFFB300), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-
-                // Editează Text / Ștampilă
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
-                        .clickable { onEditCaption?.invoke() }
-                        .padding(horizontal = 7.dp, vertical = 4.dp)
-                ) {
-                    Text(text = "✍️", fontSize = 10.sp)
-                }
-
-                if (frozenSelfieBitmap != null) {
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFF991B1B), RoundedCornerShape(10.dp))
-                            .clickable { onClearFrozenSelfie?.invoke() }
-                            .padding(horizontal = 7.dp, vertical = 4.dp)
-                    ) {
-                        Text(text = "✕", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // Corpul Ramei în funcție de stilul ales
+        // 1. Corpul Ramei în funcție de stilul ales (desenat primul ca butoanele cu zIndex să fie mereu deasupra)
         when (frameStyle) {
             "stamp-vintage", "stamp" -> {
                 Card(
@@ -719,6 +531,88 @@ fun PolaroidFrame(
                 }
             }
 
+            "mugshot" -> {
+                Card(
+                    modifier = Modifier
+                        .width(148.dp)
+                        .height(194.dp)
+                        .border(2.5.dp, Color(0xFF27272A), RoundedCornerShape(3.dp)),
+                    shape = RoundedCornerShape(3.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF4F4F5)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "🚓 ${cityName.ifBlank { "POLICE" }.uppercase().take(10)} DEPT • MUGSHOT",
+                            color = Color(0xFF18181B),
+                            fontSize = 7.5.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            modifier = Modifier.padding(bottom = 3.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .border(1.5.dp, Color(0xFF27272A), RoundedCornerShape(2.dp))
+                                .background(Color.Black)
+                        ) {
+                            RenderInnerFeed()
+                            // Rigle de înălțime pe marginea dreaptă
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .background(Color(0x99000000))
+                                    .padding(horizontal = 3.dp, vertical = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                listOf("6'6"", "6'0"", "5'6"", "5'0"").forEach { h ->
+                                    Text(
+                                        text = "$h —",
+                                        color = Color.White,
+                                        fontSize = 6.5.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        // Plăcuța neagră de identificare a deținutului
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .background(Color(0xFF09090B), RoundedCornerShape(3.dp))
+                                .border(1.dp, Color(0xFF52525B), RoundedCornerShape(3.dp))
+                                .clickable { onEditCaption?.invoke() }
+                                .padding(vertical = 3.dp, horizontal = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = captionText.ifBlank { "SUSPECT #01 • WANTED" }.uppercase().take(20),
+                                color = Color(0xFFFACC15),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = fullStampLabel.take(22),
+                                color = Color.White,
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+
             else -> {
                 Card(
                     modifier = Modifier
@@ -780,6 +674,220 @@ fun PolaroidFrame(
                                 textAlign = TextAlign.Center
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // 2. Controalele plutitoare (declarate DUPĂ Card + cu zIndex(12f) pentru a nu fi niciodată acoperite de umbra de 8.dp a Card-ului)
+        if (!isUIHidden) {
+            // Bară deasupra ramei pentru Rotire, Mărime și Mișcare
+            Row(
+                modifier = Modifier
+                    .zIndex(12f)
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-28).dp)
+                    .background(Color(0xEE000000), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "↺",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onNudgeRotate(-12f) }
+                )
+                Text(
+                    text = if (rotationDegrees != 0f) "${rotationDegrees.toInt()}°" else "✥ Trage",
+                    color = Color(0xFFFFB300),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "↻",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onNudgeRotate(12f) }
+                )
+                Text(text = "|", color = Color(0x55FFFFFF), fontSize = 10.sp)
+                Text(
+                    text = "➖",
+                    fontSize = 9.sp,
+                    modifier = Modifier.clickable { currentOnScaleChange?.invoke((currentScale - 0.15f).coerceAtLeast(0.45f)) }
+                )
+                Text(
+                    text = "${(scale * 100).toInt()}%",
+                    color = Color(0xFFFFB300),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { currentOnScaleChange?.invoke(1.0f) }
+                )
+                Text(
+                    text = "➕",
+                    fontSize = 9.sp,
+                    modifier = Modifier.clickable { currentOnScaleChange?.invoke((currentScale + 0.15f).coerceAtMost(2.3f)) }
+                )
+            }
+
+            // Buton Focus rapid pe colțul stânga-sus (zIndex 14f + offset vizibil complet)
+            Box(
+                modifier = Modifier
+                    .zIndex(14f)
+                    .align(Alignment.TopStart)
+                    .offset(x = (-6).dp, y = (-8).dp)
+                    .size(30.dp)
+                    .background(Color(0xF518181B), CircleShape)
+                    .border(1.5.dp, Color(0xFFFFB300), CircleShape)
+                    .clickable { onTriggerFocus?.invoke() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "🎯", fontSize = 13.sp)
+            }
+
+            // Buton rotund de Rotire directă pe colțul din dreapta-sus
+            Box(
+                modifier = Modifier
+                    .zIndex(14f)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-8).dp)
+                    .size(30.dp)
+                    .background(Color(0xFFFFB300), CircleShape)
+                    .border(1.5.dp, Color.Black, CircleShape)
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            currentOnRotate(dragAmount.x * 0.4f)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "↻", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // Buton rotund de Redimensionare (Mărire / Micșorare prin tragere) pe colțul din dreapta-jos
+            Box(
+                modifier = Modifier
+                    .zIndex(14f)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 6.dp, y = 8.dp)
+                    .size(30.dp)
+                    .background(Color(0xFFFB923C), CircleShape)
+                    .border(1.5.dp, Color.Black, CircleShape)
+                    .pointerInput(Unit) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val delta = (dragAmount.x + dragAmount.y) / 180f
+                            currentOnScaleChange?.invoke((currentScale + delta).coerceIn(0.45f, 2.3f))
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "⤡", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // Bara de Setări și Controale Atașată Jos la Cadrul Mic (Selfie, Timer, Focus, Comutare, Stil Ramă, Text)
+            Row(
+                modifier = Modifier
+                    .zIndex(12f)
+                    .align(Alignment.BottomCenter)
+                    .offset(y = 44.dp)
+                    .background(Color(0xF2000000), RoundedCornerShape(16.dp))
+                    .border(1.5.dp, Color(0x99FFB300), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Buton Selfie cu numărătoare inversă
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFFFFB300), RoundedCornerShape(10.dp))
+                        .clickable { onTakeSelfie?.invoke() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (selfieTimerSeconds > 0) "📷 Selfie (${selfieTimerSeconds}s)" else "📷 Selfie",
+                        color = Color.Black,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                // Selector Timer (Off / 3s / 10s)
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (selfieTimerSeconds > 0) Color(0x4DFB923C) else Color(0xFF27272A),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .border(1.dp, Color(0x66FB923C), RoundedCornerShape(10.dp))
+                        .clickable { onCycleTimer?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (selfieTimerSeconds > 0) "⏱ ${selfieTimerSeconds}s" else "⏱ Off",
+                        color = Color(0xFFFDBA74),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                // Focus rapid pentru camera mică și în bara de jos
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .border(1.dp, Color(0x66FFB300), RoundedCornerShape(10.dp))
+                        .clickable { onTriggerFocus?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "🎯", fontSize = 10.sp)
+                }
+
+                // Schimbă camera
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .clickable { onFlipCamera?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "🔄", fontSize = 10.sp)
+                }
+
+                // Schimbă rama mică
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .clickable { onCycleSmallFrame?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "▣", color = Color(0xFFFFB300), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Editează Text / Ștampilă
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .clickable { onEditCaption?.invoke() }
+                        .padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Text(text = "✍️", fontSize = 10.sp)
+                }
+
+                if (frozenSelfieBitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF991B1B), RoundedCornerShape(10.dp))
+                            .clickable { onClearFrozenSelfie?.invoke() }
+                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                    ) {
+                        Text(text = "✕", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

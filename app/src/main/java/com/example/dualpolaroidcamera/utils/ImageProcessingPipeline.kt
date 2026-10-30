@@ -1,5 +1,6 @@
 package com.example.dualpolaroidcamera.utils
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -10,6 +11,8 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -48,6 +51,49 @@ object ImageProcessingPipeline {
         return rotatedBitmap
     }
 
+    /**
+     * Încarcă din MediaStore numărul total de poze DualPolaroid și miniatura ultimei poze salvate
+     * astfel încât Galeria să nu mai afișeze niciodată "Nu ai făcut nicio poză" după captură sau repornire.
+     */
+    suspend fun loadLatestSavedPolaroid(context: Context): Triple<Int, Uri?, Bitmap?> =
+        withContext(Dispatchers.IO) {
+            try {
+                val projection = arrayOf(
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.DATE_ADDED
+                )
+                val selection = "${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("IMG_DUAL_POLAROID_%")
+                val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+                context.contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    sortOrder
+                )?.use { cursor ->
+                    val count = cursor.count
+                    if (count > 0 && cursor.moveToFirst()) {
+                        val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                        val id = cursor.getLong(idCol)
+                        val uri = ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        )
+                        val thumb = context.contentResolver.openInputStream(uri)?.use { stream ->
+                            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                            BitmapFactory.decodeStream(stream, null, opts)
+                        }
+                        return@withContext Triple(count, uri, thumb)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            return@withContext Triple(0, null, null)
+        }
+
     suspend fun createAndSavePolaroid(
         context: Context,
         backBitmap: Bitmap,
@@ -63,10 +109,39 @@ object ImageProcessingPipeline {
         captionText: String = "",
         captionFont: String = "handwriting",
         cityName: String = "BUCUREȘTI",
+        aspectRatio: String = "9:16",
+        doubleExposureEnabled: Boolean = false,
+        blendOpacity: Float = 0.5f,
+        blendMode: String = "screen",
+        hideSmallFrameInBlend: Boolean = false,
         keepFrontBitmap: Boolean = false
     ): Pair<Uri?, Bitmap?> = withContext(Dispatchers.Default) {
-        val finalWidth = backBitmap.width
-        val finalHeight = backBitmap.height
+        val targetRatio = when (aspectRatio) {
+            "1:1" -> 1.0f
+            "4:5" -> 4f / 5f
+            else -> 9f / 16f
+        }
+
+        val srcW = backBitmap.width
+        val srcH = backBitmap.height
+        val currentRatio = srcW.toFloat() / srcH.toFloat()
+
+        val finalWidth: Int
+        val finalHeight: Int
+        val cropLeft: Int
+        val cropTop: Int
+
+        if (currentRatio > targetRatio) {
+            finalHeight = srcH
+            finalWidth = (srcH * targetRatio).toInt().coerceAtLeast(100)
+            cropLeft = ((srcW - finalWidth) / 2).coerceAtLeast(0)
+            cropTop = 0
+        } else {
+            finalWidth = srcW
+            finalHeight = (srcW / targetRatio).toInt().coerceAtLeast(100)
+            cropLeft = 0
+            cropTop = ((srcH - finalHeight) / 2).coerceAtLeast(0)
+        }
 
         val finalBitmap = Bitmap.createBitmap(finalWidth, finalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(finalBitmap)
@@ -131,8 +206,24 @@ object ImageProcessingPipeline {
             colorFilter = ColorMatrixColorFilter(cm)
         }
 
-        // 1. Desenează imaginea de fundal pe tot ecranul cu filtru aplicat
-        canvas.drawBitmap(backBitmap, 0f, 0f, imagePaint)
+        // 1. Desenează imaginea de fundal decupată la raportul de aspect ales (9:16, 4:5, 1:1)
+        val backSrcRect = Rect(cropLeft, cropTop, cropLeft + finalWidth, cropTop + finalHeight)
+        val fullDestRect = RectF(0f, 0f, finalWidth.toFloat(), finalHeight.toFloat())
+        canvas.drawBitmap(backBitmap, backSrcRect, fullDestRect, imagePaint)
+
+        // 1.2. Double Exposure / Blend (Suprapunere artistică semitransparentă a portretului peste peisaj)
+        if (doubleExposureEnabled) {
+            val blendPaint = Paint(imagePaint).apply {
+                alpha = (blendOpacity.coerceIn(0.15f, 0.9f) * 255).toInt()
+                xfermode = when (blendMode) {
+                    "screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+                    "overlay" -> PorterDuffXfermode(PorterDuff.Mode.OVERLAY)
+                    else -> null
+                }
+            }
+            val frontSrcRect = Rect(0, 0, frontBitmap.width, frontBitmap.height)
+            canvas.drawBitmap(frontBitmap, frontSrcRect, fullDestRect, blendPaint)
+        }
 
         // 1.5. Desenează Rama Pozei Mari (Big Frame) + Ștampilă Dinamică + Mesaj Personalizat
         when (bigFrameStyle) {
@@ -234,154 +325,269 @@ object ImageProcessingPipeline {
                 val p = Paint().apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 28f }
                 canvas.drawRect(14f, 14f, finalWidth - 14f, finalHeight - 14f, p)
             }
-        }
-
-        // 2. Calculează dimensiunile ramei mici
-        val polaroidWidth = finalWidth * polaroidWidthRatio
-        val polaroidHeight = if (frameStyle == "circle") polaroidWidth else polaroidWidth * (180f / 140f)
-
-        val maxX = finalWidth - polaroidWidth
-        val maxY = finalHeight - polaroidHeight
-        val polaroidLeft = (relativePolaroidX * finalWidth).coerceIn(0f, maxX)
-        val polaroidTop = (relativePolaroidY * finalHeight).coerceIn(0f, maxY)
-        val polaroidRect = RectF(
-            polaroidLeft,
-            polaroidTop,
-            polaroidLeft + polaroidWidth,
-            polaroidTop + polaroidHeight
-        )
-
-        // 3. Transformare Canvas pentru Rotire liberă la unghiul ales
-        canvas.save()
-        val centerX = polaroidRect.centerX()
-        val centerY = polaroidRect.centerY()
-        canvas.rotate(rotationDegrees, centerX, centerY)
-
-        // Umbră realistă
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-            setShadowLayer(
-                polaroidWidth * 0.05f,
-                0f,
-                polaroidWidth * 0.025f,
-                Color.argb(140, 0, 0, 0)
-            )
-        }
-
-        if (frameStyle == "circle") {
-            canvas.drawCircle(centerX, centerY, polaroidWidth / 2f, shadowPaint)
-            val goldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(255, 179, 0)
-                style = Paint.Style.STROKE
-                strokeWidth = polaroidWidth * 0.05f
-            }
-            canvas.drawCircle(centerX, centerY, polaroidWidth * 0.48f, goldPaint)
-
-            val photoDestRect = RectF(
-                centerX - polaroidWidth * 0.44f,
-                centerY - polaroidWidth * 0.44f,
-                centerX + polaroidWidth * 0.44f,
-                centerY + polaroidWidth * 0.44f
-            )
-            val photoSrcRect = Rect(0, 0, frontBitmap.width, frontBitmap.height)
-            canvas.drawBitmap(frontBitmap, photoSrcRect, photoDestRect, imagePaint)
-        } else {
-            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = when (frameStyle) {
-                    "stamp-vintage", "stamp" -> Color.parseColor("#1A365D")
-                    "halloween" -> Color.parseColor("#180D2B")
-                    "christmas" -> Color.parseColor("#7F1D1D")
-                    "love" -> Color.parseColor("#831843")
-                    "hawaii" -> Color.parseColor("#064E3B")
-                    "mafia" -> Color.parseColor("#27272A")
-                    "madmax" -> Color.parseColor("#1C1917")
-                    "maxpayne" -> Color.BLACK
-                    else -> Color.WHITE
+            "mugshot" -> {
+                val rulerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.argb(180, 255, 255, 255)
+                    strokeWidth = 3f
                 }
+                val rulerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.WHITE
+                    textSize = (finalWidth * 0.022f).coerceAtLeast(22f)
+                    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                    setShadowLayer(4f, 0f, 2f, Color.BLACK)
+                }
+                val heights = listOf("6'6" / 198cm", "6'0" / 183cm", "5'6" / 168cm", "5'0" / 152cm", "4'6" / 137cm")
+                heights.forEachIndexed { idx, label ->
+                    val yPos = finalHeight * (0.14f + idx * 0.13f)
+                    canvas.drawLine(0f, yPos, finalWidth.toFloat(), yPos, rulerPaint)
+                    canvas.drawText(label, 24f, yPos - 10f, rulerTextPaint)
+                }
+
+                // Plăcuța de identificare Police Dept jos
+                val boardW = finalWidth * 0.72f
+                val boardH = finalHeight * 0.12f
+                val boardLeft = (finalWidth - boardW) / 2f
+                val boardTop = finalHeight * 0.78f
+                val boardRect = RectF(boardLeft, boardTop, boardLeft + boardW, boardTop + boardH)
+                val boardBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#EE09090B") }
+                val boardBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.parseColor("#A1A1AA")
+                    style = Paint.Style.STROKE
+                    strokeWidth = 6f
+                }
+                canvas.drawRoundRect(boardRect, 12f, 12f, boardBg)
+                canvas.drawRoundRect(boardRect, 12f, 12f, boardBorder)
+
+                val deptPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.WHITE
+                    textSize = (finalWidth * 0.024f).coerceAtLeast(24f)
+                    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                    textAlign = Paint.Align.CENTER
+                }
+                val suspectPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.parseColor("#FACC15")
+                    textSize = (finalWidth * 0.030f).coerceAtLeast(30f)
+                    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                    textAlign = Paint.Align.CENTER
+                }
+                canvas.drawText("🚓 ${cityName.ifBlank { "POLICE" }.uppercase()} DEPARTMENT", boardRect.centerX(), boardTop + boardH * 0.34f, deptPaint)
+                canvas.drawText(captionText.ifBlank { "SUSPECT #01 • WANTED" }.uppercase(), boardRect.centerX(), boardTop + boardH * 0.68f, suspectPaint)
+                canvas.drawText(dateText, boardRect.centerX(), boardTop + boardH * 0.92f, deptPaint)
+            }
+        }
+
+        // 2. Desenează cadrul mic doar dacă nu este ascuns în modul Double Exposure
+        if (!(doubleExposureEnabled && hideSmallFrameInBlend)) {
+            val polaroidWidth = finalWidth * polaroidWidthRatio
+            val polaroidHeight = if (frameStyle == "circle") polaroidWidth else polaroidWidth * (180f / 140f)
+
+            val maxX = finalWidth - polaroidWidth
+            val maxY = finalHeight - polaroidHeight
+            val polaroidLeft = (relativePolaroidX * finalWidth).coerceIn(0f, maxX)
+            val polaroidTop = (relativePolaroidY * finalHeight).coerceIn(0f, maxY)
+            val polaroidRect = RectF(
+                polaroidLeft,
+                polaroidTop,
+                polaroidLeft + polaroidWidth,
+                polaroidTop + polaroidHeight
+            )
+
+            // 3. Transformare Canvas pentru Rotire liberă la unghiul ales
+            canvas.save()
+            val centerX = polaroidRect.centerX()
+            val centerY = polaroidRect.centerY()
+            canvas.rotate(rotationDegrees, centerX, centerY)
+
+            // Umbră realistă
+            val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
                 style = Paint.Style.FILL
+                setShadowLayer(
+                    polaroidWidth * 0.05f,
+                    0f,
+                    polaroidWidth * 0.025f,
+                    Color.argb(140, 0, 0, 0)
+                )
             }
-            canvas.drawRoundRect(polaroidRect, polaroidWidth * 0.02f, polaroidWidth * 0.02f, bgPaint)
 
-            if (frameStyle == "stamp" || frameStyle == "stamp-vintage" || frameStyle == "stamp-modern") {
-                val toothRadius = polaroidWidth * 0.03f
-                val toothStep = toothRadius * 2.8f
-                val punchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.BLACK
+            if (frameStyle == "circle") {
+                canvas.drawCircle(centerX, centerY, polaroidWidth / 2f, shadowPaint)
+                val goldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(255, 179, 0)
+                    style = Paint.Style.STROKE
+                    strokeWidth = polaroidWidth * 0.05f
                 }
-                var x = polaroidRect.left + toothStep / 2f
-                while (x < polaroidRect.right) {
-                    canvas.drawCircle(x, polaroidRect.top, toothRadius, punchPaint)
-                    canvas.drawCircle(x, polaroidRect.bottom, toothRadius, punchPaint)
-                    x += toothStep
-                }
-                var y = polaroidRect.top + toothStep / 2f
-                while (y < polaroidRect.bottom) {
-                    canvas.drawCircle(polaroidRect.left, y, toothRadius, punchPaint)
-                    canvas.drawCircle(polaroidRect.right, y, toothRadius, punchPaint)
-                    y += toothStep
-                }
+                canvas.drawCircle(centerX, centerY, polaroidWidth * 0.48f, goldPaint)
 
-                if (frameStyle == "stamp-vintage" || frameStyle == "stamp") {
-                    val archTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.WHITE
-                        textSize = polaroidWidth * 0.044f
-                        typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+                val photoDestRect = RectF(
+                    centerX - polaroidWidth * 0.44f,
+                    centerY - polaroidWidth * 0.44f,
+                    centerX + polaroidWidth * 0.44f,
+                    centerY + polaroidWidth * 0.44f
+                )
+                val photoSrcRect = Rect(0, 0, frontBitmap.width, frontBitmap.height)
+                canvas.drawBitmap(frontBitmap, photoSrcRect, photoDestRect, imagePaint)
+            } else {
+                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = when (frameStyle) {
+                        "stamp-vintage", "stamp" -> Color.parseColor("#1A365D")
+                        "halloween" -> Color.parseColor("#180D2B")
+                        "christmas" -> Color.parseColor("#7F1D1D")
+                        "love" -> Color.parseColor("#831843")
+                        "hawaii" -> Color.parseColor("#064E3B")
+                        "mafia" -> Color.parseColor("#27272A")
+                        "madmax" -> Color.parseColor("#1C1917")
+                        "maxpayne" -> Color.BLACK
+                        "mugshot" -> Color.parseColor("#F4F4F5")
+                        else -> Color.WHITE
+                    }
+                    style = Paint.Style.FILL
+                }
+                canvas.drawRoundRect(polaroidRect, polaroidWidth * 0.02f, polaroidWidth * 0.02f, bgPaint)
+
+                if (frameStyle == "stamp" || frameStyle == "stamp-vintage" || frameStyle == "stamp-modern") {
+                    val toothRadius = polaroidWidth * 0.03f
+                    val toothStep = toothRadius * 2.8f
+                    val punchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.BLACK
+                    }
+                    var x = polaroidRect.left + toothStep / 2f
+                    while (x < polaroidRect.right) {
+                        canvas.drawCircle(x, polaroidRect.top, toothRadius, punchPaint)
+                        canvas.drawCircle(x, polaroidRect.bottom, toothRadius, punchPaint)
+                        x += toothStep
+                    }
+                    var y = polaroidRect.top + toothStep / 2f
+                    while (y < polaroidRect.bottom) {
+                        canvas.drawCircle(polaroidRect.left, y, toothRadius, punchPaint)
+                        canvas.drawCircle(polaroidRect.right, y, toothRadius, punchPaint)
+                        y += toothStep
+                    }
+
+                    if (frameStyle == "stamp-vintage" || frameStyle == "stamp") {
+                        val archTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = Color.WHITE
+                            textSize = polaroidWidth * 0.044f
+                            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+                            textAlign = Paint.Align.CENTER
+                        }
+                        val headerTitle = "★ ${cityName.ifBlank { "UNITED STATES" }.uppercase()} POSTAGE ★"
+                        canvas.drawText(headerTitle.take(26), polaroidRect.centerX(), polaroidRect.top + polaroidHeight * 0.09f, archTextPaint)
+                    }
+                } else if (frameStyle == "mugshot") {
+                    val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.parseColor("#18181B")
+                        textSize = polaroidWidth * 0.046f
+                        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                         textAlign = Paint.Align.CENTER
                     }
-                    val headerTitle = "★ ${cityName.ifBlank { "UNITED STATES" }.uppercase()} POSTAGE ★"
-                    canvas.drawText(headerTitle.take(26), polaroidRect.centerX(), polaroidRect.top + polaroidHeight * 0.09f, archTextPaint)
+                    canvas.drawText(
+                        "🚓 ${cityName.ifBlank { "POLICE" }.uppercase().take(10)} DEPT • MUGSHOT",
+                        polaroidRect.centerX(),
+                        polaroidRect.top + polaroidHeight * 0.08f,
+                        headerPaint
+                    )
+                }
+
+                val sidePadding = polaroidWidth * (10f / 140f)
+                val topPadding = polaroidHeight * (12f / 180f)
+                val bottomSpace = polaroidHeight * (34f / 180f)
+
+                val photoLeft = polaroidRect.left + sidePadding
+                val photoTop = polaroidRect.top + topPadding
+                val photoRight = polaroidRect.right - sidePadding
+                val photoBottom = polaroidRect.bottom - bottomSpace
+
+                val photoDestRect = RectF(photoLeft, photoTop, photoRight, photoBottom)
+                val photoSrcRect = Rect(0, 0, frontBitmap.width, frontBitmap.height)
+                canvas.drawBitmap(frontBitmap, photoSrcRect, photoDestRect, imagePaint)
+
+                if (frameStyle == "mugshot") {
+                    // Rigle de înălțime pe fotografia mică
+                    val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.WHITE
+                        textSize = polaroidWidth * 0.038f
+                        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                        textAlign = Paint.Align.RIGHT
+                        setShadowLayer(3f, 0f, 1f, Color.BLACK)
+                    }
+                    listOf("6'6"", "6'0"", "5'6"", "5'0"").forEachIndexed { idx, h ->
+                        val ty = photoTop + (photoBottom - photoTop) * (0.2f + idx * 0.2f)
+                        canvas.drawText("$h —", photoRight - 6f, ty, tickPaint)
+                    }
+
+                    // Plăcuța neagră jos
+                    val placardRect = RectF(
+                        photoLeft,
+                        photoBottom + 4f,
+                        photoRight,
+                        polaroidRect.bottom - 6f
+                    )
+                    val placardBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#09090B") }
+                    canvas.drawRoundRect(placardRect, 6f, 6f, placardBg)
+
+                    val suspectPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.parseColor("#FACC15")
+                        textSize = polaroidHeight * 0.044f
+                        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                        textAlign = Paint.Align.CENTER
+                    }
+                    val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.WHITE
+                        textSize = polaroidHeight * 0.036f
+                        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                        textAlign = Paint.Align.CENTER
+                    }
+                    canvas.drawText(
+                        captionText.ifBlank { "SUSPECT #01 • WANTED" }.uppercase().take(20),
+                        placardRect.centerX(),
+                        placardRect.top + placardRect.height() * 0.45f,
+                        suspectPaint
+                    )
+                    canvas.drawText(
+                        fullStampHeader.take(22),
+                        placardRect.centerX(),
+                        placardRect.top + placardRect.height() * 0.85f,
+                        datePaint
+                    )
+                } else {
+                    val textColor = when (frameStyle) {
+                        "film35", "stamp-vintage", "stamp", "halloween", "christmas", "love", "hawaii", "mafia", "madmax", "maxpayne" -> Color.WHITE
+                        else -> Color.BLACK
+                    }
+
+                    val textX = polaroidRect.centerX()
+                    if (captionText.isNotBlank()) {
+                        val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = textColor
+                            textSize = polaroidHeight * 0.052f
+                            typeface = selectedTypeface
+                            textAlign = Paint.Align.CENTER
+                        }
+                        val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = textColor
+                            textSize = polaroidHeight * 0.038f
+                            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                            textAlign = Paint.Align.CENTER
+                        }
+                        canvas.drawText(captionText.take(24), textX, photoBottom + (polaroidRect.bottom - photoBottom) * 0.44f, captionPaint)
+                        canvas.drawText(fullStampHeader.take(24), textX, photoBottom + (polaroidRect.bottom - photoBottom) * 0.84f, datePaint)
+                    } else {
+                        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = textColor
+                            textSize = polaroidHeight * 0.046f
+                            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                            textAlign = Paint.Align.CENTER
+                        }
+                        val textY = photoBottom + ((polaroidRect.bottom - photoBottom) / 2f) - ((textPaint.descent() + textPaint.ascent()) / 2f)
+                        canvas.drawText(fullStampHeader.take(24), textX, textY, textPaint)
+                    }
                 }
             }
 
-            val sidePadding = polaroidWidth * (10f / 140f)
-            val topPadding = polaroidHeight * (12f / 180f)
-            val bottomSpace = polaroidHeight * (34f / 180f)
-
-            val photoLeft = polaroidRect.left + sidePadding
-            val photoTop = polaroidRect.top + topPadding
-            val photoRight = polaroidRect.right - sidePadding
-            val photoBottom = polaroidRect.bottom - bottomSpace
-
-            val photoDestRect = RectF(photoLeft, photoTop, photoRight, photoBottom)
-            val photoSrcRect = Rect(0, 0, frontBitmap.width, frontBitmap.height)
-            canvas.drawBitmap(frontBitmap, photoSrcRect, photoDestRect, imagePaint)
-
-            val textColor = when (frameStyle) {
-                "film35", "stamp-vintage", "stamp", "halloween", "christmas", "love", "hawaii", "mafia", "madmax", "maxpayne" -> Color.WHITE
-                else -> Color.BLACK
-            }
-
-            val textX = polaroidRect.centerX()
-            if (captionText.isNotBlank()) {
-                val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = textColor
-                    textSize = polaroidHeight * 0.052f
-                    typeface = selectedTypeface
-                    textAlign = Paint.Align.CENTER
-                }
-                val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = textColor
-                    textSize = polaroidHeight * 0.038f
-                    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                    textAlign = Paint.Align.CENTER
-                }
-                canvas.drawText(captionText.take(24), textX, photoBottom + (polaroidRect.bottom - photoBottom) * 0.44f, captionPaint)
-                canvas.drawText(fullStampHeader.take(24), textX, photoBottom + (polaroidRect.bottom - photoBottom) * 0.84f, datePaint)
-            } else {
-                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = textColor
-                    textSize = polaroidHeight * 0.046f
-                    typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                    textAlign = Paint.Align.CENTER
-                }
-                val textY = photoBottom + ((polaroidRect.bottom - photoBottom) / 2f) - ((textPaint.descent() + textPaint.ascent()) / 2f)
-                canvas.drawText(fullStampHeader.take(24), textX, textY, textPaint)
-            }
+            // Încheie rotirea Canvas
+            canvas.restore()
         }
-
-        // Încheie rotirea Canvas
-        canvas.restore()
 
         // Creăm o miniatură (thumbnail) pentru butonul de Galerie înainte de salvarea în MediaStore
         val previewThumb = Bitmap.createScaledBitmap(

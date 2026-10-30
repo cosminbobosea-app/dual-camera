@@ -74,9 +74,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -131,8 +133,16 @@ fun CameraScreen() {
     var polaroidRotation by remember { mutableFloatStateOf(0f) }
     var polaroidScale by remember { mutableFloatStateOf(1.0f) }
     var mainZoom by remember { mutableFloatStateOf(1.0f) }
+    val currentMainZoom by rememberUpdatedState(mainZoom)
     var activeTab by remember { mutableStateOf<String?>("smallFrames") }
     var isUIHidden by remember { mutableStateOf(false) }
+
+    // Formatul Pozei Finale (Raport de Aspect: 9:16, 4:5, 1:1) & Double Exposure (Fuziune artistică)
+    var selectedAspectRatio by remember { mutableStateOf("9:16") }
+    var doubleExposureEnabled by remember { mutableStateOf(false) }
+    var blendOpacity by remember { mutableFloatStateOf(0.50f) }
+    var blendMode by remember { mutableStateOf("screen") }
+    var hideSmallFrameInBlend by remember { mutableStateOf(false) }
 
     // Text Personalizat, Font și Ștampilă Poștală Dinamică (Dată + Oraș GPS)
     val currentDateText = remember {
@@ -147,11 +157,25 @@ fun CameraScreen() {
     var gyroRoll by remember { mutableFloatStateOf(0f) }
     var gyroPitch by remember { mutableFloatStateOf(0f) }
 
-    // Shortcut Galerie & Previzualizare Ultima Poză
+    // Shortcut Galerie & Previzualizare Ultima Poză (Încărcat automat din MediaStore Pictures/DualPolaroid)
     var lastCapturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var lastCapturedUri by remember { mutableStateOf<Uri?>(null) }
     var capturedCount by remember { mutableIntStateOf(0) }
     var showGalleryDialog by remember { mutableStateOf(false) }
+
+    // Încarcă automat pozele salvate anterior în Pictures/DualPolaroid la pornire și la deschiderea Galeriei
+    LaunchedEffect(showGalleryDialog) {
+        val (count, latestUri, latestBmp) = ImageProcessingPipeline.loadLatestSavedPolaroid(context)
+        if (count > 0) {
+            capturedCount = maxOf(capturedCount, count)
+            if (lastCapturedUri == null && latestUri != null) {
+                lastCapturedUri = latestUri
+            }
+            if (lastCapturedBitmap == null && latestBmp != null) {
+                lastCapturedBitmap = latestBmp
+            }
+        }
+    }
 
     // Temporizator Selfie (0s, 3s, 10s) și poză selfie înghețată în rama mică
     var selfieTimerSeconds by remember { mutableIntStateOf(3) }
@@ -266,15 +290,19 @@ fun CameraScreen() {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            isClickable = false
+            isFocusable = false
+            isFocusableInTouchMode = false
         }
     }
 
     var backImageCapture: ImageCapture? by remember { mutableStateOf(null) }
     var frontImageCapture: ImageCapture? by remember { mutableStateOf(null) }
 
-    // Poziție Drag & Drop a ramei mici (plasată sub bara de sus, convertită în pixeli reali)
-    val initialX = with(density) { 16.dp.toPx() }
-    val initialY = with(density) { 150.dp.toPx() }
+    // Poziție Drag & Drop a ramei mici (cu margine sigură >= 18.dp în stânga ca butonul Focus să fie 100% vizibil)
+    val minSafeX = with(density) { 16.dp.toPx() }
+    val initialX = with(density) { 20.dp.toPx() }
+    val initialY = with(density) { 155.dp.toPx() }
     var polaroidOffsetX by remember { mutableFloatStateOf(initialX) }
     var polaroidOffsetY by remember { mutableFloatStateOf(initialY) }
 
@@ -438,7 +466,7 @@ fun CameraScreen() {
 
     val triggerSelfieCapture: () -> Unit = {
         val frontCap = frontImageCapture
-        if (frontCap != null && selfieCountdown == null) {
+        if (selfieCountdown == null) {
             coroutineScope.launch {
                 try {
                     val toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
@@ -456,9 +484,17 @@ fun CameraScreen() {
                         selfieCountdown = null
                     }
                     toneGen.startTone(ToneGenerator.TONE_PROP_BEEP2, 220)
-                    val snap = takePictureToBitmap(context, frontCap, isBackPrimary)
-                    frozenSelfieBitmap = snap
-                    Toast.makeText(context, "Selfie capturat în rama mică!", Toast.LENGTH_SHORT).show()
+                    val previewFallback = frontPreviewView.bitmap
+                    val snap = try {
+                        if (frontCap != null) takePictureToBitmap(context, frontCap, isBackPrimary)
+                        else previewFallback
+                    } catch (e: Exception) {
+                        previewFallback
+                    }
+                    if (snap != null) {
+                        frozenSelfieBitmap = snap
+                        Toast.makeText(context, "Selfie capturat în rama mică!", Toast.LENGTH_SHORT).show()
+                    }
                 } catch (e: Exception) {
                     selfieCountdown = null
                     Toast.makeText(context, "Eroare la capturarea selfie-ului", Toast.LENGTH_SHORT).show()
@@ -515,8 +551,9 @@ fun CameraScreen() {
                         .pointerInput(Unit) {
                             detectTransformGestures { _, _, zoomChange, _ ->
                                 if (zoomChange != 1f) {
-                                    mainZoom = (mainZoom * zoomChange).coerceIn(1.0f, 5.0f)
-                                    primaryCameraControl?.setZoomRatio(mainZoom)
+                                    val nextZ = (currentMainZoom * zoomChange).coerceIn(1.0f, 5.0f)
+                                    mainZoom = nextZ
+                                    primaryCameraControl?.setZoomRatio(nextZ)
                                 }
                             }
                         }
@@ -531,6 +568,49 @@ fun CameraScreen() {
                         factory = { backPreviewView },
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    // Stratul 1.1: Previzualizare Live Double Exposure (Fuziune artistică portret peste peisaj)
+                    if (doubleExposureEnabled && frozenSelfieBitmap != null) {
+                        Image(
+                            bitmap = frozenSelfieBitmap!!.asImageBitmap(),
+                            contentDescription = "Double Exposure Blend",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(blendOpacity)
+                        )
+                    }
+                }
+
+                // Stratul 1.15: Ghidaj Vizual Format Aspect Ratio (4:5 sau 1:1)
+                if (selectedAspectRatio != "9:16") {
+                    val targetHeightDp = with(density) {
+                        val wDp = maxWidth
+                        if (selectedAspectRatio == "1:1") wDp else wDp * 1.25f
+                    }
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(targetHeightDp)
+                                .border(2.dp, Color(0xCCFFB300), RoundedCornerShape(2.dp))
+                        ) {
+                            Text(
+                                text = "FORMAT $selectedAspectRatio",
+                                color = Color(0xFFFCD34D),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(6.dp)
+                                    .background(Color(0xCC000000), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 // Stratul 1.2: Nivelă Electronică Giroscopică (Orizont Virtual în centrul ecranului)
@@ -849,6 +929,113 @@ fun CameraScreen() {
                             )
                         }
                     }
+                    "mugshot" -> {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            // Riglă de înălțime pe marginile din stânga și dreapta
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(vertical = 80.dp, horizontal = 8.dp),
+                                verticalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                listOf(
+                                    "6'6" / 198cm",
+                                    "6'3" / 190cm",
+                                    "6'0" / 183cm",
+                                    "5'9" / 175cm",
+                                    "5'6" / 168cm",
+                                    "5'3" / 160cm",
+                                    "5'0" / 152cm"
+                                ).forEach { mark ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "— $mark",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier
+                                                .background(Color(0x99000000), RoundedCornerShape(3.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(horizontal = 6.dp)
+                                                .height(1.dp)
+                                                .background(Color(0x44FFFFFF))
+                                        )
+                                        Text(
+                                            text = "$mark —",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier
+                                                .background(Color(0x99000000), RoundedCornerShape(3.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Antet Sus Police Dept
+                            Text(
+                                text = "🚓 POLICE DEPT • ${cityName.ifBlank { "CENTRAL" }} PRECINCT",
+                                color = Color(0xFFFACC15),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 14.dp)
+                                    .background(Color(0xEE09090B), RoundedCornerShape(4.dp))
+                                    .border(1.5.dp, Color(0xFF71717A), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+
+                            // Plăcuță Neagră de Identificare (Mugshot Placard) jos
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 115.dp)
+                                    .background(Color(0xF509090B), RoundedCornerShape(6.dp))
+                                    .border(2.5.dp, Color(0xFFD4D4D8), RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        isUIHidden = false
+                                        activeTab = "caption"
+                                    }
+                                    .padding(horizontal = 18.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "${cityName.ifBlank { "METRO" }} POLICE DEPARTMENT",
+                                    color = Color(0xFFA1A1AA),
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = customCaption.ifBlank { "SUSPECT #01 • WANTED" }.uppercase(),
+                                    color = Color(0xFFFACC15),
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(
+                                    text = "ID: 9482-B  •  $currentDateText",
+                                    color = Color.White,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Focus reticle animation
@@ -865,63 +1052,65 @@ fun CameraScreen() {
                 }
 
                 // Stratul 2: Fereastra dinamică cu Rame Multiple, Înclinare 3D Giroscopică, Drag & Drop, Pinch-to-Scale și Bara de Setări Atașată
-                PolaroidFrame(
-                    frontPreviewView = frontPreviewView,
-                    frozenSelfieBitmap = frozenSelfieBitmap,
-                    selfieCountdown = selfieCountdown,
-                    selfieTimerSeconds = selfieTimerSeconds,
-                    offsetX = polaroidOffsetX,
-                    offsetY = polaroidOffsetY,
-                    rotationDegrees = polaroidRotation,
-                    scale = polaroidScale,
-                    frameStyle = selectedFrameStyle,
-                    captionText = customCaption,
-                    captionFont = captionFont,
-                    cityName = cityName,
-                    gyroPitch = gyroPitch,
-                    gyroRoll = gyroRoll,
-                    gyroEnabled = gyroEnabled,
-                    isUIHidden = isUIHidden,
-                    onDrag = { dx, dy ->
-                        val newX = polaroidOffsetX + dx
-                        val newY = polaroidOffsetY + dy
-                        polaroidOffsetX = newX.coerceIn(-20f, screenWidthPx - polaroidWidthPx * 0.5f)
-                        polaroidOffsetY = newY.coerceIn(80f, screenHeightPx - polaroidHeightPx - 160f)
-                    },
-                    onRotate = { delta ->
-                        polaroidRotation = (polaroidRotation + delta) % 360f
-                    },
-                    onNudgeRotate = { step ->
-                        polaroidRotation = (polaroidRotation + step) % 360f
-                    },
-                    onScaleChange = { newScale ->
-                        polaroidScale = newScale.coerceIn(0.45f, 2.3f)
-                    },
-                    onTriggerFocus = { triggerFocus("front") },
-                    onTakeSelfie = { triggerSelfieCapture() },
-                    onCycleTimer = {
-                        selfieTimerSeconds = when (selfieTimerSeconds) {
-                            0 -> 3
-                            3 -> 10
-                            else -> 0
-                        }
-                    },
-                    onFlipCamera = { isBackPrimary = !isBackPrimary },
-                    onCycleSmallFrame = {
-                        val styles = listOf(
-                            "stamp-vintage", "stamp-modern", "polaroid", "halloween",
-                            "christmas", "love", "hawaii", "mafia", "madmax", "maxpayne",
-                            "film35", "postcard", "circle"
-                        )
-                        val idx = styles.indexOf(selectedFrameStyle)
-                        selectedFrameStyle = styles[(idx + 1) % styles.size]
-                    },
-                    onEditCaption = {
-                        isUIHidden = false
-                        activeTab = "caption"
-                    },
-                    onClearFrozenSelfie = { frozenSelfieBitmap = null }
-                )
+                if (!(doubleExposureEnabled && hideSmallFrameInBlend)) {
+                    PolaroidFrame(
+                        frontPreviewView = frontPreviewView,
+                        frozenSelfieBitmap = frozenSelfieBitmap,
+                        selfieCountdown = selfieCountdown,
+                        selfieTimerSeconds = selfieTimerSeconds,
+                        offsetX = polaroidOffsetX,
+                        offsetY = polaroidOffsetY,
+                        rotationDegrees = polaroidRotation,
+                        scale = polaroidScale,
+                        frameStyle = selectedFrameStyle,
+                        captionText = customCaption,
+                        captionFont = captionFont,
+                        cityName = cityName,
+                        gyroPitch = gyroPitch,
+                        gyroRoll = gyroRoll,
+                        gyroEnabled = gyroEnabled,
+                        isUIHidden = isUIHidden,
+                        onDrag = { dx, dy ->
+                            val newX = polaroidOffsetX + dx
+                            val newY = polaroidOffsetY + dy
+                            polaroidOffsetX = newX.coerceIn(minSafeX, screenWidthPx - polaroidWidthPx * 0.5f)
+                            polaroidOffsetY = newY.coerceIn(80f, screenHeightPx - polaroidHeightPx - 160f)
+                        },
+                        onRotate = { delta ->
+                            polaroidRotation = (polaroidRotation + delta) % 360f
+                        },
+                        onNudgeRotate = { step ->
+                            polaroidRotation = (polaroidRotation + step) % 360f
+                        },
+                        onScaleChange = { newScale ->
+                            polaroidScale = newScale.coerceIn(0.45f, 2.5f)
+                        },
+                        onTriggerFocus = { triggerFocus("front") },
+                        onTakeSelfie = { triggerSelfieCapture() },
+                        onCycleTimer = {
+                            selfieTimerSeconds = when (selfieTimerSeconds) {
+                                0 -> 3
+                                3 -> 10
+                                else -> 0
+                            }
+                        },
+                        onFlipCamera = { isBackPrimary = !isBackPrimary },
+                        onCycleSmallFrame = {
+                            val styles = listOf(
+                                "stamp-vintage", "stamp-modern", "polaroid", "mugshot",
+                                "halloween", "christmas", "love", "hawaii", "mafia",
+                                "madmax", "maxpayne", "film35", "postcard", "circle"
+                            )
+                            val idx = styles.indexOf(selectedFrameStyle)
+                            selectedFrameStyle = styles[(idx + 1) % styles.size]
+                        },
+                        onEditCaption = {
+                            isUIHidden = false
+                            activeTab = "caption"
+                        },
+                        onClearFrozenSelfie = { frozenSelfieBitmap = null }
+                    )
+                }
 
                 // Stratul 3: Bara de Sus Compactă și Responsive (fără text vertical)
                 if (!isUIHidden) {
@@ -963,6 +1152,61 @@ fun CameraScreen() {
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Selector Rapid Format / Aspect Ratio (9:16 | 4:5 | 1:1)
+                                Row(
+                                    modifier = Modifier
+                                        .background(Color(0xFF18181B), RoundedCornerShape(16.dp))
+                                        .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(16.dp))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf("9:16", "4:5", "1:1").forEach { ratio ->
+                                        val isRatioSel = selectedAspectRatio == ratio
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (isRatioSel) Color(0xFFFFB300) else Color.Transparent,
+                                                    RoundedCornerShape(12.dp)
+                                                )
+                                                .clickable {
+                                                    selectedAspectRatio = ratio
+                                                    Toast.makeText(context, "Format foto: $ratio", Toast.LENGTH_SHORT).show()
+                                                }
+                                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = ratio,
+                                                color = if (isRatioSel) Color.Black else Color.LightGray,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Buton Rapid Double Exposure / Blend (Fuziune Artistică)
+                                Button(
+                                    onClick = {
+                                        doubleExposureEnabled = !doubleExposureEnabled
+                                        if (doubleExposureEnabled) activeTab = "blend"
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (doubleExposureEnabled) Color(0xFFD946EF) else Color(0xFF27272A),
+                                        contentColor = if (doubleExposureEnabled) Color.White else Color(0xFFF0ABFC)
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text(
+                                        text = if (doubleExposureEnabled) "✨ Blend ON" else "✨ Blend",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+
                                 // Buton Giroscop / Nivelă
                                 Button(
                                     onClick = { gyroEnabled = !gyroEnabled },
@@ -1088,6 +1332,7 @@ fun CameraScreen() {
                             val tabs = listOf(
                                 Triple("smallFrames", "▣ Ramă Mică", Color(0xFFFFB300)),
                                 Triple("bigFrames", "⤢ Ramă Mare", Color(0xFF38BDF8)),
+                                Triple("blend", "✨ Double Exposure", Color(0xFFE879F9)),
                                 Triple("caption", "✍️ Text & Ștampilă", Color(0xFFFDE047)),
                                 Triple("timer", "⏱ Timer (${selfieTimerSeconds}s)", Color(0xFFFB923C)),
                                 Triple("filters", "✨ Filtre", Color.White),
@@ -1134,6 +1379,7 @@ fun CameraScreen() {
                                         "stamp-vintage" to "Timbru Gravat",
                                         "stamp-modern" to "Timbru Modern",
                                         "polaroid" to "Polaroid Clasic",
+                                        "mugshot" to "Mugshot 🚓",
                                         "halloween" to "Halloween 🎃",
                                         "christmas" to "Crăciun 🎄",
                                         "love" to "Love 💖",
@@ -1214,6 +1460,7 @@ fun CameraScreen() {
                             ) {
                                 listOf(
                                     "none" to "❌ Fără Ramă (Curat)",
+                                    "mugshot" to "Mugshot Poliție 🚓",
                                     "postcard-full" to "Vedere Poștală",
                                     "stamp-border" to "Timbru Uriaș",
                                     "film-sprockets" to "Film 35mm Cinema",
@@ -1246,6 +1493,118 @@ fun CameraScreen() {
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
                                             softWrap = false
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Panoul 2.2: Double Exposure / Blend (Fuziune artistică portret peste peisaj)
+                        if (activeTab == "blend") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xF2000000), RoundedCornerShape(16.dp))
+                                    .border(1.dp, Color(0x80E879F9), RoundedCornerShape(16.dp))
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "✨ Double Exposure (Portret peste Peisaj)",
+                                        color = Color(0xFFF0ABFC),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Button(
+                                        onClick = { doubleExposureEnabled = !doubleExposureEnabled },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (doubleExposureEnabled) Color(0xFFD946EF) else Color(0xFF27272A),
+                                            contentColor = Color.White
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 3.dp),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(
+                                            text = if (doubleExposureEnabled) "Activ ✓" else "Activează",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Opacitate:", color = Color.LightGray, fontSize = 11.sp, modifier = Modifier.width(68.dp))
+                                    Slider(
+                                        value = blendOpacity,
+                                        onValueChange = {
+                                            blendOpacity = it
+                                            if (!doubleExposureEnabled) doubleExposureEnabled = true
+                                        },
+                                        valueRange = 0.15f..0.85f,
+                                        modifier = Modifier.weight(1f),
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = Color(0xFFE879F9),
+                                            activeTrackColor = Color(0xFFD946EF)
+                                        )
+                                    )
+                                    Text(
+                                        text = "${(blendOpacity * 100).toInt()}%",
+                                        color = Color(0xFFF0ABFC),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.width(40.dp),
+                                        textAlign = TextAlign.End
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf(
+                                        "screen" to "Screen (Luminos)",
+                                        "overlay" to "Overlay (Contrast)",
+                                        "normal" to "Soft Blend"
+                                    ).forEach { (id, lbl) ->
+                                        val isModeSel = blendMode == id
+                                        Button(
+                                            onClick = {
+                                                blendMode = id
+                                                if (!doubleExposureEnabled) doubleExposureEnabled = true
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isModeSel) Color(0xFFE879F9) else Color(0xFF27272A),
+                                                contentColor = if (isModeSel) Color.Black else Color.White
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Text(text = lbl, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { hideSmallFrameInBlend = !hideSmallFrameInBlend },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (hideSmallFrameInBlend) Color(0xFFFFB300) else Color(0xFF27272A),
+                                            contentColor = if (hideSmallFrameInBlend) Color.Black else Color.LightGray
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(
+                                            text = if (hideSmallFrameInBlend) "Fără Cadrul Mic ✓" else "+ Cadrul Mic",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
@@ -1547,17 +1906,46 @@ fun CameraScreen() {
                         onOpenGallery = { showGalleryDialog = true },
                         onToggleSettings = { isUIHidden = !isUIHidden },
                         onClick = {
-                            val backCap = backImageCapture
-                            val frontCap = frontImageCapture
-                            if (backCap != null && frontCap != null && !isProcessing) {
+                            if (!isProcessing) {
                                 isProcessing = true
+                                // Extragem pe firul principal (UI) bitmap-urile din PreviewView ca plasă de siguranță 100%
+                                // pentru dispozitivele unde declanșarea simultană ImageCapture pe 2 camere aruncă excepție HAL
+                                val backPreviewFallback = backPreviewView.bitmap
+                                val frontPreviewFallback = frozenSelfieBitmap ?: frontPreviewView.bitmap
+
                                 coroutineScope.launch {
                                     try {
-                                        val primaryDeferred = async(Dispatchers.IO) { takePictureToBitmap(context, backCap, !isBackPrimary) }
-                                        val secondaryBitmap = frozenSelfieBitmap ?: async(Dispatchers.IO) {
-                                            takePictureToBitmap(context, frontCap, isBackPrimary)
-                                        }.await()
-                                        val primaryBitmap = primaryDeferred.await()
+                                        val backCap = backImageCapture
+                                        val frontCap = frontImageCapture
+
+                                        val primaryBitmap = try {
+                                            if (backCap != null) {
+                                                withContext(Dispatchers.IO) {
+                                                    takePictureToBitmap(context, backCap, !isBackPrimary)
+                                                }
+                                            } else {
+                                                backPreviewFallback
+                                            }
+                                        } catch (e: Exception) {
+                                            backPreviewFallback
+                                        }
+
+                                        val secondaryBitmap = frozenSelfieBitmap ?: try {
+                                            if (frontCap != null) {
+                                                withContext(Dispatchers.IO) {
+                                                    takePictureToBitmap(context, frontCap, isBackPrimary)
+                                                }
+                                            } else {
+                                                frontPreviewFallback
+                                            }
+                                        } catch (e: Exception) {
+                                            frontPreviewFallback
+                                        }
+
+                                        if (primaryBitmap == null || secondaryBitmap == null) {
+                                            Toast.makeText(context, context.getString(R.string.save_failure), Toast.LENGTH_SHORT).show()
+                                            return@launch
+                                        }
 
                                         val relativeX = polaroidOffsetX / screenWidthPx
                                         val relativeY = polaroidOffsetY / screenHeightPx
@@ -1577,6 +1965,11 @@ fun CameraScreen() {
                                             captionText = customCaption,
                                             captionFont = captionFont,
                                             cityName = cityName,
+                                            aspectRatio = selectedAspectRatio,
+                                            doubleExposureEnabled = doubleExposureEnabled,
+                                            blendOpacity = blendOpacity,
+                                            blendMode = blendMode,
+                                            hideSmallFrameInBlend = hideSmallFrameInBlend,
                                             keepFrontBitmap = frozenSelfieBitmap != null
                                         )
 
